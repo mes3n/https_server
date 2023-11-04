@@ -14,20 +14,20 @@ The openssl package is recommended.
 
 Install cargo:
 ```bash
-    apt install cargo
-    pacman -S cargo
+apt install cargo
+pacman -S cargo
 ```
 
 Compile source code:
 ```bash
-   cargo build 
+cargo build 
 ```
 
 #### Client
 
 If cargo is installed the IPC communication clinet can be built with:
 ```bash
-    cargo build --bin client
+cargo build --bin client
 ```
 
 ## Configuration
@@ -52,7 +52,7 @@ for the changes to take effect.
 
 The server creates a socket file in /tmp which can be used for IPC through the client application provided in src/bin/client.rs. This file can be compiled and run through
 ```bash
-    cargo run --bin client
+cargo run --bin client
 ```
 
 The implementation of commands has so far been limited to a ```stop``` command to stop the server along with ```help``` and ```exit``` for manging the client itself.
