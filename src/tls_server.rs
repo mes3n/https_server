@@ -13,12 +13,14 @@ use std::{
 
 use crate::{request_handler::RequestHandler, settings::Https, thread_pool::ThreadPool};
 
+type RequestHandlerFn = Arc<dyn Fn(String) -> String + Send + Sync>;
+
 pub struct TlsServer {
     ip: String,
     port: u16,
 
     acceptor: Arc<TlsAcceptor>,
-    request_handler: Arc<RequestHandler>,
+    request_handler: RequestHandlerFn,
 
     handle: Option<thread::JoinHandle<()>>,
     thread_pool: Arc<ThreadPool>,
@@ -27,18 +29,26 @@ pub struct TlsServer {
 }
 
 impl TlsServer {
-    pub fn new(ip: String, settings_https: &Https, request_handler: Arc<RequestHandler>) -> Self {
+    pub fn new(ip: String, settings_https: &Https, rq_handler_obj: Arc<RequestHandler>) -> Self {
         let identity = Identity::from_pkcs12(
             &read(&settings_https.ssl.identity).unwrap(),
             &settings_https.ssl.password,
         )
-        .unwrap();
+        .expect("Could not create identity for TlsServer.");
 
         let acceptor = TlsAcceptor::new(identity).unwrap();
         let acceptor = Arc::new(acceptor);
 
         let thread_pool = ThreadPool::new(settings_https.threads);
         let thread_pool = Arc::new(thread_pool);
+
+        let request_handler: RequestHandlerFn = if let Some(destination) =
+            settings_https.redirect.clone()
+        {
+            Arc::new(move |request: String| rq_handler_obj.redirect(request, destination.clone()))
+        } else {
+            Arc::new(move |request: String| rq_handler_obj.handle(request))
+        };
 
         TlsServer {
             ip,
@@ -87,7 +97,7 @@ impl TlsServer {
         ip: String,
         port: u16,
         acceptor: Arc<TlsAcceptor>,
-        request_handler: Arc<RequestHandler>,
+        request_handler: RequestHandlerFn,
         thread_pool: Arc<ThreadPool>,
         running: Arc<AtomicBool>,
     ) {
@@ -132,15 +142,15 @@ impl TlsServer {
         println!("TlsServer thread exited cleanly.");
     }
 
-    fn handle_client(mut stream: TlsStream<TcpStream>, request_handler: Arc<RequestHandler>) {
+    fn handle_client(mut stream: TlsStream<TcpStream>, request_handler: RequestHandlerFn) {
         let mut reader = BufReader::new(&mut stream);
         let received = reader.fill_buf().unwrap().to_vec();
         let request = String::from_utf8_lossy(&received).to_string();
         if !request.ends_with("\r\n\r\n") {
-            return;  // Internal Server Error or smthn
+            return; // Internal Server Error or smthn
         }
         reader.consume(received.len());
-        let response = request_handler.handle(request);
+        let response = request_handler(request);
         stream.write_all(response.as_bytes()).unwrap();
         println!("Sent response.");
     }

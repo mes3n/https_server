@@ -12,6 +12,7 @@ fn main() {
     let request_handler = RequestHandler::new(settings.server.document_root.clone());
     let request_handler = Arc::new(request_handler);
 
+
     let mut tcp_server = TcpServer::new(
         settings.server.ip.clone(),
         &settings.http,

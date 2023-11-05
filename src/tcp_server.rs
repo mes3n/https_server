@@ -10,12 +10,13 @@ use std::{
 
 use crate::{request_handler::RequestHandler, settings::Http, thread_pool::ThreadPool};
 
+type RequestHandlerFn = Arc<dyn Fn(String) -> String + Send + Sync>;
+
 pub struct TcpServer {
     ip: String,
     port: u16,
 
-    destination: Option<String>,
-    request_handler: Arc<RequestHandler>,
+    request_handler: RequestHandlerFn,
 
     handle: Option<thread::JoinHandle<()>>,
     thread_pool: Arc<ThreadPool>,
@@ -24,16 +25,22 @@ pub struct TcpServer {
 }
 
 impl TcpServer {
-    pub fn new(ip: String, settings_http: &Http, request_handler: Arc<RequestHandler>) -> Self {
+    pub fn new(ip: String, settings_http: &Http, rq_handler_obj: Arc<RequestHandler>) -> Self {
         let thread_pool = ThreadPool::new(settings_http.threads);
         let thread_pool = Arc::new(thread_pool);
 
-        let destination = settings_http.redirect.clone();
+        let request_handler: RequestHandlerFn = if let Some(destination) =
+            settings_http.redirect.clone()
+        {
+            Arc::new(move |request: String| rq_handler_obj.redirect(request, destination.clone()))
+        } else {
+            Arc::new(move |request: String| rq_handler_obj.handle(request))
+        };
+
         TcpServer {
             ip,
             port: settings_http.port,
 
-            destination,
             request_handler,
 
             handle: None,
@@ -44,15 +51,8 @@ impl TcpServer {
     }
 
     pub fn start_thread(&mut self) {
-        let destination = self.destination.clone();
-        if destination.is_none() {
-            println!("No destination set for TcpServer, not starting thread");
-            return;
-        }
-
         let ip = self.ip.clone();
         let port = self.port;
-        let destination = destination.unwrap();
 
         let request_handler = self.request_handler.clone();
         let thread_pool = self.thread_pool.clone();
@@ -60,9 +60,9 @@ impl TcpServer {
         self.running.store(true, Relaxed);
         let running = self.running.clone();
 
-        println!("Starting TcpServer thread on {ip}:{port} with redirect to {destination}");
+        println!("Starting TcpServer thread on {ip}:{port}");
         self.handle = Some(thread::spawn(move || {
-            Self::run(ip, port, destination, request_handler, thread_pool, running);
+            Self::run(ip, port, request_handler, thread_pool, running);
         }));
     }
 
@@ -80,8 +80,7 @@ impl TcpServer {
     fn run(
         ip: String,
         port: u16,
-        destination: String,
-        request_handler: Arc<RequestHandler>,
+        request_handler: RequestHandlerFn,
         thread_pool: Arc<ThreadPool>,
         running: Arc<AtomicBool>,
     ) {
@@ -94,10 +93,9 @@ impl TcpServer {
             match stream {
                 Ok(stream) => {
                     let request_handler = request_handler.clone();
-                    let destination = destination.clone();
                     thread_pool.execute(Box::new(move || {
                         println!("TcpServer recieved new connection.");
-                        Self::handle_client(stream, request_handler, destination);
+                        Self::handle_client(stream, request_handler);
                     }));
                 }
                 Err(e) => match e.kind() {
@@ -116,20 +114,15 @@ impl TcpServer {
         println!("TcpServer thread exited cleanly.");
     }
 
-    fn handle_client(
-        mut stream: TcpStream,
-        request_handler: Arc<RequestHandler>,
-        destination: String,
-    ) {
+    fn handle_client(mut stream: TcpStream, request_handler: RequestHandlerFn) {
         let mut reader = BufReader::new(&mut stream);
         let received = reader.fill_buf().unwrap().to_vec();
-        println!("Received: {}", String::from_utf8_lossy(&received));
         let request = String::from_utf8_lossy(&received).to_string();
         if !request.ends_with("\r\n\r\n") {
-            return;  // Internal Server Error or smthn
+            return; // Internal Server Error or smthn
         }
         reader.consume(received.len());
-        let response = request_handler.redirect(request, destination);
+        let response = request_handler(request);
         stream.write_all(response.as_bytes()).unwrap();
         println!("Sent response.");
     }

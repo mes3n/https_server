@@ -18,7 +18,7 @@ pub struct Server {
 #[derive(Deserialize)]
 pub struct Https {
     pub port: u16,
-    // pub redirect: Option<String>,
+    pub redirect: Option<String>,
     #[serde(default = "threads")]
     pub threads: usize,
     pub ssl: SSL,
