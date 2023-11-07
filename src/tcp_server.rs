@@ -25,7 +25,11 @@ pub struct TcpServer {
 }
 
 impl TcpServer {
-    pub fn new(ip: String, settings_http: &Http, rq_handler_obj: Arc<RequestHandler>) -> Self {
+    pub fn new(
+        ip: String,
+        settings_http: &Http,
+        rq_handler_obj: Arc<RequestHandler>,
+    ) -> Result<Self, String> {
         let thread_pool = ThreadPool::new(settings_http.threads);
         let thread_pool = Arc::new(thread_pool);
 
@@ -37,7 +41,7 @@ impl TcpServer {
             Arc::new(move |request: String| rq_handler_obj.handle(request))
         };
 
-        TcpServer {
+        Ok(TcpServer {
             ip,
             port: settings_http.port,
 
@@ -47,7 +51,7 @@ impl TcpServer {
             thread_pool,
 
             running: Arc::new(AtomicBool::new(false)),
-        }
+        })
     }
 
     pub fn start_thread(&mut self) {
@@ -67,13 +71,13 @@ impl TcpServer {
     }
 
     pub fn join_thread(&mut self) {
-        if self.handle.is_none() {
+        if let Some(handle) = self.handle.take() {
+            if let Err(_) = handle.join() {
+                println!("Error joining TcpServer thread.");
+            }
+        } else {
             println!("No thread to join.");
             return;
-        }
-
-        if let Some(handle) = self.handle.take() {
-            handle.join().expect("Failed to join thread.");
         }
     }
 
@@ -84,7 +88,8 @@ impl TcpServer {
         thread_pool: Arc<ThreadPool>,
         running: Arc<AtomicBool>,
     ) {
-        let listener = TcpListener::bind(format!("{}:{}", ip, port)).unwrap();
+        let listener = TcpListener::bind(format!("{}:{}", ip, port))
+            .expect(format!("Failed to bind TcpListener to {ip}:{port}").as_str());
         listener
             .set_nonblocking(true)
             .expect("Failed to set nonblocking TcpListener.");
@@ -117,11 +122,11 @@ impl TcpServer {
     fn handle_client(mut stream: TcpStream, request_handler: RequestHandlerFn) {
         let mut reader = BufReader::new(&mut stream);
         let received = reader.fill_buf().unwrap().to_vec();
+        reader.consume(received.len());
         let request = String::from_utf8_lossy(&received).to_string();
         if !request.ends_with("\r\n\r\n") {
             return; // Internal Server Error or smthn
         }
-        reader.consume(received.len());
         let response = request_handler(request);
         stream.write_all(response.as_bytes()).unwrap();
         println!("Sent response.");

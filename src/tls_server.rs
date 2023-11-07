@@ -29,14 +29,39 @@ pub struct TlsServer {
 }
 
 impl TlsServer {
-    pub fn new(ip: String, settings_https: &Https, rq_handler_obj: Arc<RequestHandler>) -> Self {
-        let identity = Identity::from_pkcs12(
-            &read(&settings_https.ssl.identity).unwrap(),
+    pub fn new(
+        ip: String,
+        settings_https: &Https,
+        rq_handler_obj: Arc<RequestHandler>,
+    ) -> Result<Self, String> {
+        let identity = match Identity::from_pkcs12(
+            match &read(&settings_https.ssl.identity) {
+                Ok(identity) => identity,
+                Err(e) => {
+                    return Result::Err(format!(
+                        "Could not read identity file {} for TlsServer: {e}",
+                        &settings_https.ssl.identity
+                    ));
+                }
+            },
             &settings_https.ssl.password,
-        )
-        .expect("Could not create identity for TlsServer.");
+        ) {
+            Ok(identity) => identity,
+            Err(e) => {
+                return Result::Err(format!(
+                    "Could not create identity for TlsServer. Got error: {e}"
+                ));
+            }
+        };
 
-        let acceptor = TlsAcceptor::new(identity).unwrap();
+        let acceptor = match TlsAcceptor::new(identity) {
+            Ok(acceptor) => acceptor,
+            Err(e) => {
+                return Result::Err(format!(
+                    "Could not create TlsAcceptor for TlsServer. Got error: {e}"
+                ));
+            }
+        };
         let acceptor = Arc::new(acceptor);
 
         let thread_pool = ThreadPool::new(settings_https.threads);
@@ -50,7 +75,7 @@ impl TlsServer {
             Arc::new(move |request: String| rq_handler_obj.handle(request))
         };
 
-        TlsServer {
+        Ok(TlsServer {
             ip,
             port: settings_https.port,
 
@@ -61,7 +86,7 @@ impl TlsServer {
             thread_pool,
 
             running: Arc::new(AtomicBool::new(false)),
-        }
+        })
     }
 
     pub fn start_thread(&mut self) {
@@ -83,13 +108,13 @@ impl TlsServer {
     }
 
     pub fn join_thread(&mut self) {
-        if self.handle.is_none() {
+        if let Some(handle) = self.handle.take() {
+            if let Err(_) = handle.join() {
+                println!("Error joining TlsServer thread.");
+            }
+        } else {
             println!("No thread to join.");
             return;
-        }
-
-        if let Some(handle) = self.handle.take() {
-            handle.join().expect("Failed to join thread");
         }
     }
 
@@ -101,7 +126,8 @@ impl TlsServer {
         thread_pool: Arc<ThreadPool>,
         running: Arc<AtomicBool>,
     ) {
-        let listener = TcpListener::bind(format!("{}:{}", ip, port)).unwrap();
+        let listener = TcpListener::bind(format!("{}:{}", ip, port))
+            .expect(format!("Failed to bind TlsListener to {ip}:{port}").as_str());
         listener
             .set_nonblocking(true)
             .expect("Failed to set nonblocking TlsListener.");
@@ -120,8 +146,7 @@ impl TlsServer {
                             }
                         };
                         println!(
-                            "TlsServer recieved new connection: {}",
-                            stream.get_ref().peer_addr().unwrap()
+                            "TlsServer recieved new connection.",
                         );
                         Self::handle_client(stream, request_handler);
                     }));
@@ -145,11 +170,11 @@ impl TlsServer {
     fn handle_client(mut stream: TlsStream<TcpStream>, request_handler: RequestHandlerFn) {
         let mut reader = BufReader::new(&mut stream);
         let received = reader.fill_buf().unwrap().to_vec();
+        reader.consume(received.len());
         let request = String::from_utf8_lossy(&received).to_string();
         if !request.ends_with("\r\n\r\n") {
             return; // Internal Server Error or smthn
         }
-        reader.consume(received.len());
         let response = request_handler(request);
         stream.write_all(response.as_bytes()).unwrap();
         println!("Sent response.");

@@ -12,20 +12,35 @@ fn main() {
     let request_handler = RequestHandler::new(settings.server.document_root.clone());
     let request_handler = Arc::new(request_handler);
 
-
-    let mut tcp_server = TcpServer::new(
+    let _tcp_server = match TcpServer::new(
         settings.server.ip.clone(),
         &settings.http,
         request_handler.clone(),
-    );
-    tcp_server.start_thread();
+    ) {
+        Ok(mut tcp_server) => {
+            tcp_server.start_thread();
+            Some(tcp_server)
+        }
+        Err(err) => {
+            println!("Error creating TcpServer: {:?}", err);
+            None
+        }
+    };
 
-    let mut tls_server = TlsServer::new(
+    let _tls_server = match TlsServer::new(
         settings.server.ip.clone(),
         &settings.https,
         request_handler.clone(),
-    );
-    tls_server.start_thread();
+    ) {
+        Ok(mut tls_server) => {
+            tls_server.start_thread();
+            Some(tls_server)
+        }
+        Err(err) => {
+            println!("Error creating TlsServer: {:?}", err);
+            None
+        }
+    };
 
     IpcListener::new().listen_block();
 
