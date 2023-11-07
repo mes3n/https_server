@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::fs::read_to_string;
+use std::{error::Error, fs::read_to_string};
 
 #[derive(Deserialize)]
 pub struct Settings {
@@ -42,13 +42,16 @@ fn threads() -> usize {
     4
 }
 
+type Result<T> = std::result::Result<T, Box<dyn Error>>;
+
 impl Settings {
-    pub fn new(from: &str) -> Self {
-        match toml::from_str(
-            &read_to_string(from).expect(&format!("File {from} could not be found in working directory")),
-        ) {
-            Ok(settings) => settings,
-            Err(e) => panic!("Failed to parse settings in {from}: {e}"),
+    pub fn new(path: &str) -> Result<Self> {
+        match toml::from_str(&match read_to_string(path) {
+            Ok(content) => content,
+            Err(err) => return Err(err.into()),
+        }) {
+            Ok(settings) => Ok(settings),
+            Err(err) => return Err(err.into()),
         }
     }
 }

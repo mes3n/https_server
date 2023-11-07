@@ -6,10 +6,22 @@ use my_server::{
 };
 
 fn main() {
-    let settings = Settings::new("Settings.toml");
+    let settings = match Settings::new("Settings.toml") {
+        Ok(settings) => settings,
+        Err(err) => {
+            println!("Error creating Settings: {err:?}");
+            return;
+        }
+    };
     let settings = Arc::new(settings);
 
-    let request_handler = RequestHandler::new(settings.server.document_root.clone());
+    let request_handler = match RequestHandler::new(settings.server.document_root.clone()) {
+        Ok(request_handler) => request_handler,
+        Err(err) => {
+            println!("Error creating Request Handler: {err:?}");
+            return;
+        }
+    };
     let request_handler = Arc::new(request_handler);
 
     let _tcp_server = match TcpServer::new(
