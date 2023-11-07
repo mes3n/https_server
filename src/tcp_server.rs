@@ -75,9 +75,6 @@ impl TcpServer {
             if let Err(_) = handle.join() {
                 println!("Error joining TcpServer thread.");
             }
-        } else {
-            println!("No thread to join.");
-            return;
         }
     }
 
@@ -128,8 +125,10 @@ impl TcpServer {
             return; // Internal Server Error or smthn
         }
         let response = request_handler(request);
-        stream.write_all(response.as_bytes()).unwrap();
-        println!("Sent response.");
+        match stream.write_all(response.as_bytes()) {
+            Ok(_) => println!("Sent response."),
+            Err(e) => println!("Failed to send response. {e:?}")
+        };
     }
 }
 

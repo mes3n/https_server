@@ -32,7 +32,6 @@ impl ThreadPool {
     }
 
     pub fn execute(&self, job: Job) {
-        // let job = Box::new(f);
         self.sender.send(Message::NewJob(job)).unwrap();
     }
 }
@@ -41,13 +40,18 @@ impl Drop for ThreadPool {
     fn drop(&mut self) {
         // println!("Sending terminate message to all workers.");
         for _ in &self.workers {
-            self.sender.send(Message::Terminate).unwrap();
+            match self.sender.send(Message::Terminate) {
+                Err(e) => println!("Failed to send terminate message to worker. {e:?}"),
+                _ => {}
+            };
         }
 
         for worker in &mut self.workers {
-            // println!("Shutting down worker {}", worker.id);
             if let Some(handle) = worker.handle.take() {
-                handle.join().unwrap();
+                match handle.join() {
+                    Err(e) => println!("Error joining worker thread. {e:?}"),
+                    _ => {}
+                };
             }
         }
         println!("All workers shut down.");
@@ -61,14 +65,23 @@ struct Worker {
 impl Worker {
     fn new(receiver: Arc<Mutex<Receiver<Message>>>) -> Self {
         let handle = thread::spawn(move || loop {
-            match receiver
-                .lock()
-                .expect("Couldn't lock thread for worker {id}.")
-                .recv()
-                .unwrap()
-            {
+            let receiver = match receiver.lock() {
+                Ok(receiver) => receiver,
+                Err(_) => {
+                    println!("Couldn't lock thread for worker.");
+                    continue;
+                }
+            };
+            let message = match receiver.recv() {
+                Ok(message) => message,
+                Err(_) => {
+                    println!("Couldn't receive message for worker.");
+                    continue;
+                }
+            };
+            match message {
                 Message::NewJob(job) => {
-                    print!("Worker got a job: ");
+                    println!("Worker got a job.");
                     job();
                     println!("Job done.");
                 }

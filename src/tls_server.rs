@@ -109,12 +109,10 @@ impl TlsServer {
 
     pub fn join_thread(&mut self) {
         if let Some(handle) = self.handle.take() {
-            if let Err(_) = handle.join() {
-                println!("Error joining TlsServer thread.");
-            }
-        } else {
-            println!("No thread to join.");
-            return;
+            match handle.join() {
+                Err(e) => println!("Error joining TlsServer thread. {e:?}"),
+                _ => {}
+            };
         }
     }
 
@@ -176,8 +174,10 @@ impl TlsServer {
             return; // Internal Server Error or smthn
         }
         let response = request_handler(request);
-        stream.write_all(response.as_bytes()).unwrap();
-        println!("Sent response.");
+        match stream.write_all(response.as_bytes()) {
+            Ok(_) => println!("Sent response."),
+            Err(e) => println!("Failed to send response. {e:?}")
+        };
     }
 }
 
